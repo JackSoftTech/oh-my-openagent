@@ -1,10 +1,11 @@
 import { existsSync, readdirSync, readFileSync } from "fs"
-import { join, basename } from "path"
+import { join } from "path"
 import type { AgentConfig } from "@opencode-ai/sdk"
 import { parseFrontmatter } from "../../shared/frontmatter"
-import { isMarkdownFile } from "../../shared/file-utils"
 import { getClaudeConfigDir } from "../../shared"
 import type { AgentScope, AgentFrontmatter, LoadedAgent } from "./types"
+
+const AGENT_DIR_ENTRY = "AGENT.md"
 
 function parseToolsConfig(toolsStr?: string): Record<string, boolean> | undefined {
   if (!toolsStr) return undefined
@@ -19,6 +20,38 @@ function parseToolsConfig(toolsStr?: string): Record<string, boolean> | undefine
   return result
 }
 
+function loadAgentFromFile(agentPath: string, agentName: string, scope: AgentScope): LoadedAgent | null {
+  try {
+    const content = readFileSync(agentPath, "utf-8")
+    const { data, body } = parseFrontmatter<AgentFrontmatter>(content)
+
+    const name = data.name || agentName
+    const originalDescription = data.description || ""
+
+    const formattedDescription = `(${scope}) ${originalDescription}`
+
+    const config: AgentConfig = {
+      description: formattedDescription,
+      mode: "subagent",
+      prompt: body.trim(),
+    }
+
+    const toolsConfig = parseToolsConfig(data.tools)
+    if (toolsConfig) {
+      config.tools = toolsConfig
+    }
+
+    return {
+      name,
+      path: agentPath,
+      config,
+      scope,
+    }
+  } catch {
+    return null
+  }
+}
+
 function loadAgentsFromDir(agentsDir: string, scope: AgentScope): LoadedAgent[] {
   if (!existsSync(agentsDir)) {
     return []
@@ -28,39 +61,15 @@ function loadAgentsFromDir(agentsDir: string, scope: AgentScope): LoadedAgent[] 
   const agents: LoadedAgent[] = []
 
   for (const entry of entries) {
-    if (!isMarkdownFile(entry)) continue
+    // Directory-based format: <name>/AGENT.md
+    if (entry.isDirectory()) {
+      const agentPath = join(agentsDir, entry.name, AGENT_DIR_ENTRY)
+      if (!existsSync(agentPath)) continue
 
-    const agentPath = join(agentsDir, entry.name)
-    const agentName = basename(entry.name, ".md")
-
-    try {
-      const content = readFileSync(agentPath, "utf-8")
-      const { data, body } = parseFrontmatter<AgentFrontmatter>(content)
-
-       const name = data.name || agentName
-       const originalDescription = data.description || ""
-
-       const formattedDescription = `(${scope}) ${originalDescription}`
-
-       const config: AgentConfig = {
-         description: formattedDescription,
-         mode: "subagent",
-         prompt: body.trim(),
-       }
-
-       const toolsConfig = parseToolsConfig(data.tools)
-      if (toolsConfig) {
-        config.tools = toolsConfig
+      const agent = loadAgentFromFile(agentPath, entry.name, scope)
+      if (agent) {
+        agents.push(agent)
       }
-
-      agents.push({
-        name,
-        path: agentPath,
-        config,
-        scope,
-      })
-    } catch {
-      continue
     }
   }
 

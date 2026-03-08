@@ -26,6 +26,7 @@ import { maybeCreateSisyphusConfig } from "./builtin-agents/sisyphus-agent"
 import { maybeCreateHephaestusConfig } from "./builtin-agents/hephaestus-agent"
 import { maybeCreateAtlasConfig } from "./builtin-agents/atlas-agent"
 import { buildCustomAgentMetadata, parseRegisteredAgentSummaries } from "./custom-agent-summaries"
+import { loadMarkdownAgents } from "./markdown-agents"
 
 type AgentSource = AgentFactory | AgentConfig
 
@@ -191,6 +192,22 @@ export async function createBuiltinAgents(
   })
   if (atlasConfig) {
     result["atlas"] = atlasConfig
+  }
+
+  const markdownAgentConfigs = await loadMarkdownAgents(directory, systemDefaultModel)
+  for (const [name, config] of Object.entries(markdownAgentConfigs)) {
+    const lowerName = name.toLowerCase()
+    if (builtinAgentNames.has(lowerName)) continue
+    if (disabledAgentNames.has(lowerName)) continue
+    if (result[lowerName]) continue
+
+    result[name] = config
+
+    availableAgents.push({
+      name,
+      description: config.description ?? `Custom agent: ${name}`,
+      metadata: ((config as Record<string, unknown>).promptMetadata as AgentPromptMetadata | undefined) ?? buildCustomAgentMetadata(name, config.description ?? `Custom agent: ${name}`),
+    })
   }
 
   return result
